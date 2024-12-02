@@ -1,10 +1,12 @@
 from django.urls import path
 
-from eventshuffle.views import EventListView, EventCreateView, EventShowView
+from eventshuffle.views import event_list, create_event, get_specific_event, add_vote
 
 urlpatterns = [
-    path('', EventCreateView.as_view(), name='event-create'),
-    path('list/', EventListView.as_view(), name='event-list'),
-    path('<int:event_id>/',EventShowView.as_view(), name='event-show'),
+    
+    path('<int:id>/', get_specific_event, name='event-show'),
+    path('', create_event, name='event-create'),
+    path('list/', event_list, name='event-list'),
+    path('<int:id>/vote/', add_vote, name='add_vote'),
     
 ]

@@ -1,100 +1,94 @@
 from django.http import HttpResponse, JsonResponse
 from eventshuffle.models import Event, EventDate, Vote
-from rest_framework import serializers
 from eventshuffle.models import Event
-from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.core.exceptions import ObjectDoesNotExist
-
-class EventSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Event
-        fields = ['id', 'name'] 
+from rest_framework.decorators import api_view
 
 
-class EventDateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = EventDate
-        fields = ['date']
+@api_view(['GET'])
+def event_list(request):
+    events = Event.objects.values('id', 'name')
+    return Response({'events': events})
 
-class VoteSerializer(serializers.Serializer):
-    date = serializers.DateField(format='%Y-%m-%d')
-    people = serializers.ListField(
-        child=serializers.CharField(),
-        read_only=True
-    )
+@api_view(['POST'])
+def create_event(request):
+    try:
+        # Extract data from the request
+        event_name = request.data.get('name')
+        event_dates = request.data.get('dates', [])
 
+        # Validate input
+        if not event_name or not isinstance(event_dates, list):
+            return Response({'error': 'Invalid input data'}, status=status.HTTP_400_BAD_REQUEST)
 
-class EventCreateSerializer(serializers.ModelSerializer):
-    dates = serializers.ListField(
-        child=serializers.DateField(format='%Y-%m-%d'),
-        write_only=True
-    )
+        # Create Event
+        event = Event.objects.create(name=event_name)
 
-    class Meta:
-        model = Event
-        fields = ['id', 'name', 'dates']
+        # Create EventDate instances
+        event_date_objects = [
+            EventDate(event=event, date=date, attendees=[]) for date in event_dates
+        ]
+        EventDate.objects.bulk_create(event_date_objects)
 
-    def create(self, validated_data):
-        dates = validated_data.pop('dates', [])
-        event = Event.objects.create(**validated_data)
-        for date in dates:
-            EventDate.objects.create(event=event, date=date)
-        return event
+        # Return response with the ID of the created event
+        return Response({'id': event.id}, status=status.HTTP_201_CREATED)
 
-class EventShowSerializer(serializers.ModelSerializer):
-    dates = serializers.ListField(
-        child=serializers.DateField(format='%Y-%m-%d'),
-        read_only=True
-    )
-
-    votes = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Event
-        fields = ['id', 'name', 'dates', 'votes']
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    def get_votes(self, obj):
-        # Get all votes grouped by date
-        votes = obj['votes']
-        return votes
+
+def generate_event_json(event, event_dates):
+    response_data =  {
+        'id': event.id,
+        'name': event.name,
+        'dates': [entry.date for entry in event_dates],
+        'votes': [
+            {
+                'date': entry.date,
+                'people': entry.people,
+            }
+            for entry in event_dates if entry.people
+        ],
+    }
+
+    return Response(response_data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_specific_event(request, id):
+    try:
+        event = Event.objects.get(id=id)
+        event_dates = EventDate.objects.filter(event=event)
+
+        response = generate_event_json(event, event_dates)
+
+        return response
+
+    except Event.DoesNotExist:
+        return Response({"error": "Event not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['POST'])
+def add_vote(request, id):
+    try:
+        event = Event.objects.get(id=id)
+        event_dates = EventDate.objects.filter(event=event)
+
+        person_name = request.data.get('name')
+        chosen_dates = request.data.get('votes', [])
+
+        for date in event_dates:
+            if date.date in chosen_dates:
+                date.people.append(person_name)
         
-    
+        response = generate_event_json(event, event_dates)
 
-class EventListView(APIView):
-    def get(self, request):
-        events = Event.objects.all()  # Fetch all events
-        serializer = EventSerializer(events, many=True)
-        print(serializer.data)
-        return JsonResponse({"events": serializer.data}, status=status.HTTP_200_OK)
-    
-class EventCreateView(APIView):
-    def post(self, request):
-        serializer = EventCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            event = serializer.save()
-            return Response({"id": event.id}, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class EventShowView(APIView):
-    def get(self, request, event_id):
-        try:
-            event = Event.objects.get(id=event_id)
-            dates = list(map(lambda entry: entry.date, event.dates.all()))
-            print(event.dates.all()[0].votes.all())
-            validDates = list(filter(lambda date: len(date.votes.all()) > 0, event.dates.all()))
-            votes = []
-            for validDate in validDates:
-                line = {"date": validDate.date, "people": list(map(lambda entry: entry.person, validDate.votes.all()))}
-                votes.append(line)
-
-
-            data = {"id": event.id, "name": event.name, "dates": dates, "votes": votes}
-
-            serializer = EventShowSerializer(data)
-            return JsonResponse(serializer.data)
-        except ObjectDoesNotExist:
-            return JsonResponse({"error": "Event not found"}, status=404)
-
+        return response
+    except Event.DoesNotExist:
+        return Response({"error": "Event not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+

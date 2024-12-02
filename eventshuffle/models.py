@@ -1,5 +1,5 @@
 from django.db import models
-
+from django.contrib.postgres.fields import ArrayField
 
 
 class Event(models.Model):
@@ -14,12 +14,7 @@ class EventDate(models.Model):
     event = models.ForeignKey(Event, related_name='dates', on_delete=models.CASCADE)
     date = models.DateField()
 
-    def __str__(self):
-        return f"{self.event.name} - {self.date}"
-    
-class Vote(models.Model):
-    date = models.ForeignKey(EventDate, related_name='votes', on_delete=models.CASCADE)
-    person = models.CharField(max_length=255)
+    people = ArrayField(models.CharField(max_length=255), blank=True, default=list)
 
     def __str__(self):
-        return f"{self.person} - {self.date.date}"
+        return f"{self.event.name} - {self.date}"
